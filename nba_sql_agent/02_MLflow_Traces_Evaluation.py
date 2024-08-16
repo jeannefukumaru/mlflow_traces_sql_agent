@@ -12,15 +12,26 @@ dbutils.library.restartPython()
 
 # COMMAND ----------
 
+# MAGIC %run ./sql_agent_nb
+
+# COMMAND ----------
+
 from pyspark.sql import functions as F 
 import pandas as pd
 import mlflow
 from mlflow.client import MlflowClient
+import pandas as pd 
+
 client = MlflowClient()
 
 # COMMAND ----------
 
 dbutils.widgets.text("mlflow_run_id", "")
+
+# COMMAND ----------
+
+mlflow_run_id = getArgument('mlflow_run_id')
+chain = mlflow.langchain.load_model(f"runs:/{mlflow_run_id}/chain")
 
 # COMMAND ----------
 
@@ -72,11 +83,7 @@ eval_data = [
     }
 ]
 
-eval_df = spark.createDataFrame(eval_data)
-
-# COMMAND ----------
-
-eval_df.head()
+eval_df = pd.DataFrame(eval_data)
 
 # COMMAND ----------
 
@@ -86,13 +93,18 @@ eval_df.head()
 
 # Log our evaluations to the same run as the one we used for logging our chain. 
 
-mlflow_run_id = getArgument('mlflow_run_id')
+with mlflow.start_run(run_id=mlflow_run_id):
+    responses = []
+    for r in eval_df[["request"]].to_dict(orient="records"):
+        prompt_str = {"messages": [{"role": "user", "content": r}], "table_desc":table_desc, "column_comments": column_comments, "few_shot_examples": few_shot_examples}
+        resp = chain.invoke(prompt_str)
+        responses.append(resp)
+    eval_df["response"] = responses
+    eval_df.head()
 
 with mlflow.start_run(run_id=mlflow_run_id):
-    # Evaluate
     eval_results = mlflow.evaluate(
-        data=eval_df,
-        model=f"runs:/{mlflow_run_id}/chain",  
+        data=eval_df, 
         model_type="databricks-agent",
     )
 
@@ -141,10 +153,11 @@ class AgentAnalyzer():
       client = MlflowClient()
       for r in self.req_ids:
         trace = client.get_trace(request_id=r)
-        spans = [span.to_dict() for span in trace.data.spans if "ReActSingleInputOutputParser" in span.name]
+        spans = [span.to_dict()["events"] for span in trace.data.spans if "AgentExecutor" in span.name]
         outputs = []
         for i in range(len(spans)):
-          output_js = json.loads(spans[i]["attributes"]["mlflow.spanOutputs"])
+          print(spans[i])
+          output_js = spans[i][0]["attributes"]
           outputs.append(output_js)
         df = pd.DataFrame(outputs)
         df["request_id"] = r
@@ -168,7 +181,7 @@ class AgentAnalyzer():
       and its corresponding count of 'AgentAction' events in the agent logs.
       """
       def count_actions(req_id):
-        df = agent_logs[(agent_logs["request_id"]==req_id) & (agent_logs["type"]=="AgentAction")]
+        df = agent_logs[(agent_logs["request_id"]==req_id) & (agent_logs["tool"] is not None)]
         count = df.shape[0]
         return count
       
@@ -217,7 +230,7 @@ class AgentAnalyzer():
 # COMMAND ----------
 
 # Retrieve a trace by request ID
-req_ids = ["XXX", "XXX", "XXX"]    
+req_ids = ["xxx", "xxx", "xxx"]    
 agent_analyzer = AgentAnalyzer(req_ids, mlflow_run_id)
 
 # COMMAND ----------

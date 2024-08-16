@@ -20,18 +20,28 @@ dbutils.library.restartPython()
 
 # COMMAND ----------
 
+from mlflow.models import infer_signature
+
+input_example = {"messages": [{"role": "user", "content": "How many games have the Boston Celtics won so far this season?"}],"table_desc":table_desc, "column_comments": 
+column_comments, "few_shot_examples": few_shot_examples}
+
+prediction = "The Boston Celtics have won 7 games in the past season"
+
+signature = infer_signature(input_example, prediction)
+
+# COMMAND ----------
+
 import mlflow
 import os
 
 chain_path = "./sql_agent_nb"
 
-input_example = {"messages": [{"role": "user", "content": "How many times has Nathan Broad gotten 15+ disposals in the past 5 games at MCG"}]}
-
 with mlflow.start_run():
-    mlflow.log_param("prompt", prompt.format(question=input_example["messages"][0]["content"]))
+    mlflow.log_param("prompt", prompt)
     info = mlflow.langchain.log_model(lc_model=chain_path, 
                                       artifact_path="chain",
                                       input_example=input_example,
+                                      signature=signature,
                                       example_no_conversion=True,
                                       extra_pip_requirements=["databricks-agents",
                                                               "langchain-community",
@@ -47,8 +57,6 @@ sql_agent = mlflow.langchain.load_model(model_uri=info.model_uri)
 # MAGIC %md ### Invoke the SQL Agent chain inside our notebook to test that it works
 
 # COMMAND ----------
-
-input_example = {"messages": [{"role": "user", "content": "How many times did the Boston Celtics win an away game this year?"}]}
 
 mlflow.langchain.autolog()
 
@@ -74,7 +82,7 @@ mv = mlflow.register_model(info.model_uri, uc_model_name)
 
 from mlflow.tracking import MlflowClient
 
-description = "Uses databricks-meta-llama-70b instead of DBRX"
+description = "updated SparkSQLToolkit"
 
 client = MlflowClient()
 
